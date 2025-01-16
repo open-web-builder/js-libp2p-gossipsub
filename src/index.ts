@@ -3146,13 +3146,13 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
 
   /**
    * Adds given message IDs to the IWANT gossip cache which will be
-   * flushed (delivered to the connected peers per topic) with the 
+   * flushed (delivered to the connected peers per topic) with the
    * next heartbeat.
    *
    * @param topicID
    * @param messageIDs
    */
-  public gossipIWant (topicID: TopicStr, messageIDs: Uint8Array[]): void {
+  public pushGossipIWant (topicID: TopicStr, messageIDs: Uint8Array[]): void {
     const gossipIWantMessage: RPC.ControlIWant = {
       topicID,
       messageIDs,
@@ -3162,6 +3162,19 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
     this.mesh.get(topicID)?.forEach(peerId => {
       this.pushGossip(peerId, { iwant: [gossipIWantMessage] })
     })
+  }
+
+  /**
+   * Adds given message IDs to the IHAVE gossip cache which will be
+   * flushed (delivered to the connected peers per topic) with the
+   * next heartbeat.
+   *
+   * @param peerId
+   * @param topicID
+   * @param messageIDs
+   */
+  public pushGossipIHave (peerId: string, topicID: TopicStr, messageIDs: Uint8Array[]): void {
+    this.pushGossip(peerId, { ihave: [{ topicID, messageIDs }] })
   }
 
   /**
