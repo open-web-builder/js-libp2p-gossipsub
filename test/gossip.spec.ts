@@ -11,6 +11,7 @@ import { concat } from 'uint8arrays'
 import { fromString as uint8ArrayFromString } from 'uint8arrays/from-string'
 import { GossipsubDhi } from '../src/constants.js'
 import { GossipSub } from '../src/index.js'
+import { createControl } from '../src/utils/create-gossip-rpc.js'
 import { connectAllPubSubNodes, createComponentsArray, type GossipSubAndComponents } from './utils/create-pubsub.js'
 import type { PeerStore } from '@libp2p/interface'
 import type { ConnectionManager, Registrar } from '@libp2p/interface-internal'
@@ -355,7 +356,7 @@ describe('gossip', () => {
     // manually add control message to be sent to peerB
     const graft = { ihave: [], iwant: [], graft: [{ topicID: topic }], prune: [], idontwant: [] }
     ;(nodeA.pubsub).control.set(peerB, graft)
-    ;(nodeA.pubsub).gossip.set(peerB, [])
+    ;(nodeA.pubsub).gossip.set(peerB, createControl())
 
     const publishResult = await nodeA.pubsub.publish(topic, uint8ArrayFromString('hey'))
 
