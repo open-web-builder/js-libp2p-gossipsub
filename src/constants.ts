@@ -259,3 +259,12 @@ export const BACKOFF_SLACK = 1
 
 export const GossipsubIdontwantMinDataSize = 512
 export const GossipsubIdontwantMaxMessages = 512
+
+/**
+ * When the received IWANT can't be fulfilled, the IWANT can be gossiped
+ * futher to the network but only if it met specific criteria: the IWANT
+ * message has topicID and hopsLeft defined and hopsLeft is under specific
+ * limit. This constant defines the limit, so if the hopsLeft is greater
+ * than that limit it should not be propagated further to the network.
+ */
+export const GossipsubMaxIwantGossipHops = 3

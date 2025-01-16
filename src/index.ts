@@ -227,6 +227,15 @@ export interface GossipsubOpts extends GossipsubOptsSpec, PubSubInit {
    * @default 512
    */
   idontwantMaxMessages?: number
+
+  /**
+   * The maximum number of hops hat a gossipable IWANT may have to be
+   * accepted and propagated further in case if it cant be fulfilled
+   * by us
+   *
+   * @default 3
+   */
+  maxIwantGossipHops?: number
 }
 
 export interface GossipsubMessage {
@@ -312,7 +321,7 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
   private readonly floodsubPeers = new Set<PeerIdStr>()
 
   /** Cache of seen messages */
-  private readonly seenCache: SimpleTimeCache<void>
+  protected readonly seenCache: SimpleTimeCache<void>
 
   /**
    * Map of peer id and AcceptRequestWhileListEntry
@@ -396,7 +405,7 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
   /**
    * A message cache that contains the messages for last few heartbeat ticks
    */
-  private readonly mcache: MessageCache
+  protected readonly mcache: MessageCache
 
   /** Peer score tracking */
   public readonly score: PeerScore
@@ -493,6 +502,7 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
       gossipFactor: constants.GossipsubGossipFactor,
       idontwantMinDataSize: constants.GossipsubIdontwantMinDataSize,
       idontwantMaxMessages: constants.GossipsubIdontwantMaxMessages,
+      maxIwantGossipHops: constants.GossipsubMaxIwantGossipHops,
       ...options,
       scoreParams: createPeerScoreParams(options.scoreParams),
       scoreThresholds: createPeerScoreThresholds(options.scoreThresholds)
@@ -1561,12 +1571,25 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
     const iwantByTopic = new Map<TopicStr, number>()
     let iwantDonthave = 0
 
-    iwant.forEach(({ messageIDs }) => {
+    iwant.forEach(({ messageIDs, topicID, hopsLeft }) => {
+      const iwantToGossip: Uint8Array[] = []
+
       messageIDs?.forEach((msgId) => {
         const msgIdStr = this.msgIdToStrFn(msgId)
         const entry = this.mcache.getWithIWantCount(msgIdStr, id)
+
         if (entry == null) {
           iwantDonthave++
+
+          // When IWANT message is formed in a way that allows gossiping,
+          // mark it as the one to gossip further
+          if (
+            topicID != null && hopsLeft != null &&
+            hopsLeft > 0 && hopsLeft <= this.opts.maxIwantGossipHops &&
+            topicID.length > 0 && this.subscriptions.has(topicID)
+          ) {
+            iwantToGossip.push(msgId)
+          }
           return
         }
 
@@ -1579,6 +1602,20 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
 
         ihave.set(msgIdStr, entry.msg)
       })
+
+      // Propagate (gossip) the IWANT with messages that we don't have
+      // to the known peers of the topic
+      if (hopsLeft != null && topicID != null && iwantToGossip.length > 0) {
+        const gossipIwant: RPC.ControlIWant = {
+          topicID,
+          messageIDs: iwantToGossip,
+          hopsLeft: hopsLeft - 1
+        }
+        this.mesh.get(topicID)?.forEach(peerId => {
+          if (peerId === id) return
+          this.pushGossip(peerId, { iwant: [gossipIwant] })
+        })
+      }
     })
 
     this.metrics?.onIwantRcv(iwantByTopic, iwantDonthave)
