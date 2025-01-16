@@ -55,7 +55,7 @@ import {
   type PublishOpts
 } from './types.js'
 import { buildRawMessage, validateToRawMessage } from './utils/buildRawMessage.js'
-import { createGossipRpc, ensureControl } from './utils/create-gossip-rpc.js'
+import { createControl, createGossipRpc, ensureControl } from './utils/create-gossip-rpc.js'
 import { shuffle, messageIdToString } from './utils/index.js'
 import { msgIdFnStrictNoSign, msgIdFnStrictSign } from './utils/msgIdFn.js'
 import { multiaddrToIPStr } from './utils/multiaddr.js'
@@ -351,7 +351,7 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
    * Map of pending messages to gossip
    * peer id => control messages
    */
-  public readonly gossip = new Map<PeerIdStr, RPC.ControlIHave[]>()
+  public readonly gossip = new Map<PeerIdStr, RPC.ControlMessage>()
 
   /**
    * Map of control messages
@@ -2471,9 +2471,9 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
     }
 
     // piggyback gossip
-    const ihave = this.gossip.get(id)
-    if (ihave != null) {
-      this.piggybackGossip(id, rpc, ihave)
+    const gossipCtrl = this.gossip.get(id)
+    if (gossipCtrl != null) {
+      this.piggybackGossip(id, rpc, gossipCtrl)
       this.gossip.delete(id)
     }
 
@@ -2487,8 +2487,8 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
       if (ctrl != null) {
         this.control.set(id, ctrl)
       }
-      if (ihave != null) {
-        this.gossip.set(id, ihave)
+      if (gossipCtrl != null) {
+        this.gossip.set(id, gossipCtrl)
       }
 
       return false
@@ -2531,9 +2531,10 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
   }
 
   /** Mutates `outRpc` adding ihave control messages */
-  private piggybackGossip (id: PeerIdStr, outRpc: RPC, ihave: RPC.ControlIHave[]): void {
+  private piggybackGossip (id: PeerIdStr, outRpc: RPC, gossipCtrl: RPC.ControlMessage): void {
     const rpc = ensureControl(outRpc)
-    rpc.control.ihave = ihave
+    rpc.control.ihave = [...rpc.control.ihave, ...gossipCtrl.ihave]
+    rpc.control.iwant = [...rpc.control.iwant, ...gossipCtrl.iwant]
   }
 
   /**
@@ -2578,10 +2579,10 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
   /**
    * Emits gossip - Send IHAVE messages to a random set of gossip peers
    */
-  private emitGossip (peersToGossipByTopic: Map<string, Set<PeerIdStr>>): void {
+  private emitGossipIHave (peersToGossipByTopic: Map<string, Set<PeerIdStr>>): void {
     const gossipIDsByTopic = this.mcache.getGossipIDs(new Set(peersToGossipByTopic.keys()))
     for (const [topic, peersToGossip] of peersToGossipByTopic) {
-      this.doEmitGossip(topic, peersToGossip, gossipIDsByTopic.get(topic) ?? [])
+      this.doEmitGossipIHave(topic, peersToGossip, gossipIDsByTopic.get(topic) ?? [])
     }
   }
 
@@ -2594,7 +2595,7 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
    * @param candidateToGossip - peers to gossip
    * @param messageIDs - message ids to gossip
    */
-  private doEmitGossip (topic: string, candidateToGossip: Set<PeerIdStr>, messageIDs: Uint8Array[]): void {
+  private doEmitGossipIHave (topic: string, candidateToGossip: Set<PeerIdStr>, messageIDs: Uint8Array[]): void {
     if (messageIDs.length === 0) {
       return
     }
@@ -2633,8 +2634,10 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
         peerMessageIDs = shuffle(peerMessageIDs.slice()).slice(0, constants.GossipsubMaxIHaveLength)
       }
       this.pushGossip(id, {
-        topicID: topic,
-        messageIDs: peerMessageIDs
+        ihave: [{
+          topicID: topic,
+          messageIDs: peerMessageIDs
+        }]
       })
     })
   }
@@ -2644,9 +2647,9 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
    */
   private flush (): void {
     // send gossip first, which will also piggyback control
-    for (const [peer, ihave] of this.gossip.entries()) {
+    for (const [peer, { ihave, iwant }] of this.gossip.entries()) {
       this.gossip.delete(peer)
-      this.sendRpc(peer, createGossipRpc([], { ihave }))
+      this.sendRpc(peer, createGossipRpc([], { ihave, iwant }))
     }
     // send the remaining control messages
     for (const [peer, control] of this.control.entries()) {
@@ -2659,10 +2662,16 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
   /**
    * Adds new IHAVE messages to pending gossip
    */
-  private pushGossip (id: PeerIdStr, controlIHaveMsgs: RPC.ControlIHave): void {
+  private pushGossip (id: PeerIdStr, gossipCtrl: Partial<RPC.ControlMessage>): void {
     this.log('Add gossip to %s', id)
-    const gossip = this.gossip.get(id) ?? []
-    this.gossip.set(id, gossip.concat(controlIHaveMsgs))
+    const gossip = this.gossip.get(id) ?? createControl()
+    if ((gossipCtrl.ihave != null) && gossipCtrl.ihave.length > 0) {
+      gossip.ihave = [...gossip.ihave, ...gossipCtrl.ihave]
+    }
+    if ((gossipCtrl.iwant != null) && gossipCtrl.iwant.length > 0) {
+      gossip.iwant = [...gossip.iwant, ...gossipCtrl.iwant]
+    }
+    this.gossip.set(id, gossip)
   }
 
   /**
@@ -3084,7 +3093,7 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
       }
     })
 
-    this.emitGossip(peersToGossipByTopic)
+    this.emitGossipIHave(peersToGossipByTopic)
 
     // send coalesced GRAFT/PRUNE messages (will piggyback gossip)
     await this.sendGraftPrune(tograft, toprune, noPX)

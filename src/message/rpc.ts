@@ -414,6 +414,8 @@ export namespace RPC {
 
   export interface ControlIWant {
     messageIDs: Uint8Array[]
+    topicID?: string
+    hopsLeft?: number
   }
 
   export namespace ControlIWant {
@@ -431,6 +433,16 @@ export namespace RPC {
               w.uint32(10)
               w.bytes(value)
             }
+          }
+
+          if (obj.topicID != null) {
+            w.uint32(18)
+            w.string(obj.topicID)
+          }
+
+          if (obj.hopsLeft != null) {
+            w.uint32(24)
+            w.uint64Number(obj.hopsLeft)
           }
 
           if (opts.lengthDelimited !== false) {
@@ -453,6 +465,14 @@ export namespace RPC {
                 }
 
                 obj.messageIDs.push(reader.bytes())
+                break
+              }
+              case 2: {
+                obj.topicID = reader.string()
+                break
+              }
+              case 3: {
+                obj.hopsLeft = reader.uint64Number()
                 break
               }
               default: {

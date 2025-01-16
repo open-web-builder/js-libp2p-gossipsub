@@ -21,14 +21,17 @@ export function createGossipRpc (messages: RPC.Message[] = [], control?: Partial
 
 export function ensureControl (rpc: RPC): Required<RPC> {
   if (rpc.control === undefined) {
-    rpc.control = {
-      graft: [],
-      prune: [],
-      ihave: [],
-      iwant: [],
-      idontwant: []
-    }
+    rpc.control = createControl()
   }
-
   return rpc as Required<RPC>
+}
+
+export function createControl (): Required<RPC.ControlMessage> {
+  return {
+    graft: [],
+    prune: [],
+    ihave: [],
+    iwant: [],
+    idontwant: []
+  }
 }
