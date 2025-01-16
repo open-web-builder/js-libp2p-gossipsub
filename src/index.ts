@@ -3145,6 +3145,26 @@ export class GossipSub extends TypedEventEmitter<GossipsubEvents> implements Pub
   }
 
   /**
+   * Adds given message IDs to the IWANT gossip cache which will be
+   * flushed (delivered to the connected peers per topic) with the 
+   * next heartbeat.
+   *
+   * @param topicID
+   * @param messageIDs
+   */
+  public gossipIWant (topicID: TopicStr, messageIDs: Uint8Array[]): void {
+    const gossipIWantMessage: RPC.ControlIWant = {
+      topicID,
+      messageIDs,
+      hopsLeft: this.opts.maxIwantGossipHops
+    }
+
+    this.mesh.get(topicID)?.forEach(peerId => {
+      this.pushGossip(peerId, { iwant: [gossipIWantMessage] })
+    })
+  }
+
+  /**
    * Given a topic, returns up to count peers subscribed to that topic
    * that pass an optional filter function
    *
